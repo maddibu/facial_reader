@@ -13,6 +13,9 @@ FaceLandmarkerOptions = vision.FaceLandmarkerOptions
 VisionRunningMode = vision.RunningMode
 
 
+
+
+
 # Configuración del detector de rostros
 # model_asset_path: ruta al archivo .task descargado (debe estar en la misma carpeta)
 # running_mode IMAGE: procesa frame por frame (vs VIDEO o LIVE_STREAM que usan timestamps)
@@ -25,6 +28,9 @@ options = FaceLandmarkerOptions(
     output_facial_transformation_matrixes=False,  # no necesitamos transformaciones 3D
 )
 
+
+
+
 # 0 = cámara por defecto
 # 1 = webcam externa (camo)
 # 3 = OBS virtual camera
@@ -36,22 +42,29 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 cap.set(cv2.CAP_PROP_FPS, 30)
 
 
+
+
+
 screen_w, screen_h = pyautogui.size()
 
 smooth_x, smooth_y = screen_w // 2, screen_h // 2
 SMOOTH = 0.15
 
-calibracion = {
-    "sup_izq": None,
-    "sup_der": None,
-    "inf_izq": None,
-    "inf_der": None,
-    "centro":  None,
-}
+
+
 
 PASOS_CALIBRACION = ["sup_izq", "sup_der", "centro", "inf_izq", "inf_der"]
 paso_actual = 0
 calibrado = False
+calibracion = {}
+
+
+
+
+
+
+
+
 
 # carga el modelo y entra en un loop continuo leyendo un frame de la cámara
 # por iteración hasta que falle la lectura o el usuario salga
@@ -73,6 +86,10 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
 
         # Ejecuta el modelo sobre el frame actual
         results = landmarker.detect(mp_image)
+
+
+
+
 
         # face_landmarks es una lista de rostros detectados
         # cada rostro tiene 478 puntos: 468 del rostro + 10 del iris (468-477)
@@ -105,20 +122,19 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
             promedio_y  = int(((canto_ext_y + canto_int_y + sup_y + inf_y) / 4))
 
 
-            parpadeo = cv2.putText(frame, f'CLICK', (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+
+
             distancia = inf_y - sup_y
-            if distancia < 13:
-                parpadeo
+            parpadeo_detectado = distancia < 13
+
+            if parpadeo_detectado:
+                cv2.putText(frame, f'CLICK', (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
             
 
-            instrucciones = {
-            "sup_izq": "Mira la esquina SUPERIOR IZQUIERDA y parpadea",
-            "sup_der": "Mira la esquina SUPERIOR DERECHA y parpadea",
-            "centro":  "Mira el CENTRO de la pantalla y parpadea",
-            "inf_izq": "Mira la esquina INFERIOR IZQUIERDA y parpadea",
-            "inf_der": "Mira la esquina INFERIOR DERECHA y parpadea",
-            }
 
+
+            
             MARGEN = 15
 
             x1 = max(canto_int_x - MARGEN, 0)
@@ -132,10 +148,13 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
 
             roi_grande = cv2.resize(contraste, None, fx=4, fy=4, interpolation=cv2.INTER_LINEAR)
 
-
             cv2.imshow("ojo_derecho", roi_grande)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+
+
+
+
 
             #coordenadas de camara a coordenadas de pantalla
             screen_x = int(np.interp(iris_x, [0, width], [0, screen_w]))
@@ -150,6 +169,32 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
             smooth_y = smooth_y + SMOOTH * (screen_y - smooth_y)
 
             pyautogui.moveTo(int(smooth_x), int(smooth_y))
+
+
+
+            if not calibrado:
+                punto_calibracion = PASOS_CALIBRACION[paso_actual]
+
+                mensajes = {
+                    "sup_izq": "Mira al punto superior izquierdo y parpadea",
+                    "sup_der": "Mira al punto superior derecho y parpadea",
+                    "centro": "Mira al centro y parpadea",
+                    "inf_izq": "Mira al punto inferior izquierdo y parpadea",
+                    "inf_der": "Mira al punto inferior derecho y parpadea",
+                }
+                cv2.putText(frame, mensajes[punto_calibracion], (10, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
+                if parpadeo_detectado:
+                    calibracion[punto_calibracion] = (iris_x, iris_y)
+                    paso_actual += 1
+                    
+                    if paso_actual >= len(PASOS_CALIBRACION):
+                        calibrado = True
+                        print("Calibración completa:", calibracion)
+
+
+
+
 
             #dibujo de landmark
             cv2.circle(frame, (iris_x, iris_y), 5, (0, 255, 0), -1)  # dibuja un círculo verde en el iris
