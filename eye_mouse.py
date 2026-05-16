@@ -1,5 +1,4 @@
 from turtle import color
-
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -11,7 +10,6 @@ from mediapipe.tasks.python import vision
 BaseOptions = mp_python.BaseOptions
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
 VisionRunningMode = vision.RunningMode
-
 
 
 
@@ -42,29 +40,12 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 cap.set(cv2.CAP_PROP_FPS, 30)
 
 
+ROI_W  = 200
+ROI_H  = 100
+ESCALA = 4
 
-
-
-screen_w, screen_h = pyautogui.size()
-
-smooth_x, smooth_y = screen_w // 2, screen_h // 2
-SMOOTH = 0.15
-
-
-
-
-PASOS_CALIBRACION = ["sup_izq", "sup_der", "centro", "inf_izq", "inf_der"]
-paso_actual = 0
-calibrado = False
-calibracion = {}
-
-
-
-
-
-
-
-
+# valor inicial para evitar crash en el primer frame sin rostro
+roi_grande = np.zeros((ROI_H * ESCALA, ROI_W * ESCALA), dtype=np.uint8)
 
 # carga el modelo y entra en un loop continuo leyendo un frame de la cámara
 # por iteración hasta que falle la lectura o el usuario salga
@@ -118,22 +99,6 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
             sup_y       = int(sup.y * height)
             inf_x       = int(inf.x * width)
             inf_y       = int(inf.y * height)
-            promedio_x  = int(((canto_ext_x + canto_int_x + sup_x + inf_x) / 4))
-            promedio_y  = int(((canto_ext_y + canto_int_y + sup_y + inf_y) / 4))
-
-
-
-
-
-            distancia = inf_y - sup_y
-            parpadeo_detectado = distancia < 13
-
-            if parpadeo_detectado:
-                cv2.putText(frame, f'CLICK', (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            
-
-
-
             
             MARGEN = 15
 
@@ -145,79 +110,47 @@ with vision.FaceLandmarker.create_from_options(options) as landmarker:
             roi_ojo = frame[y1:y2, x1:x2]
             gris = cv2.cvtColor(roi_ojo, cv2.COLOR_BGR2GRAY)
             contraste = cv2.convertScaleAbs(gris, alpha=2.0, beta=-30)
+            roi_fijo   = cv2.resize(contraste, (ROI_W, ROI_H), interpolation=cv2.INTER_LINEAR)
+            roi_grande = cv2.resize(roi_fijo,  (ROI_W * ESCALA, ROI_H * ESCALA), interpolation=cv2.INTER_LINEAR)
 
-            roi_grande = cv2.resize(contraste, None, fx=4, fy=4, interpolation=cv2.INTER_LINEAR)
+            iris_roi_x = iris_x - x1
+            iris_roi_y = iris_y - y1
 
-            cv2.imshow("ojo_derecho", roi_grande)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            ancho_roi  = x2 - x1
+            alto_roi   = y2 - y1
+            iris_fijo_x = int((iris_roi_x / ancho_roi) * ROI_W) * ESCALA
+            iris_fijo_y = int((iris_roi_y / alto_roi)  * ROI_H) * ESCALA
 
+            #cv2.circle(roi_grande, (iris_fijo_x, iris_fijo_y), 8, (0, 255, 0), -1)
 
-
-
-
-            #coordenadas de camara a coordenadas de pantalla
-            screen_x = int(np.interp(iris_x, [0, width], [0, screen_w]))
-            screen_y = int(np.interp(iris_y, [0, height], [0, screen_h]))
-
-
-
-            promedio_screen_x = int(np.interp(promedio_x, [0, width], [0, screen_w]))
-            promedio_screen_y = int(np.interp(promedio_y, [0, height], [0, screen_h]))
-
-            smooth_x = smooth_x + SMOOTH * (screen_x - smooth_x)
-            smooth_y = smooth_y + SMOOTH * (screen_y - smooth_y)
-
-            pyautogui.moveTo(int(smooth_x), int(smooth_y))
-
-
-
-            if not calibrado:
-                punto_calibracion = PASOS_CALIBRACION[paso_actual]
-
-                mensajes = {
-                    "sup_izq": "Mira al punto superior izquierdo y parpadea",
-                    "sup_der": "Mira al punto superior derecho y parpadea",
-                    "centro": "Mira al centro y parpadea",
-                    "inf_izq": "Mira al punto inferior izquierdo y parpadea",
-                    "inf_der": "Mira al punto inferior derecho y parpadea",
-                }
-                cv2.putText(frame, mensajes[punto_calibracion], (10, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-
-                if parpadeo_detectado:
-                    calibracion[punto_calibracion] = (iris_x, iris_y)
-                    paso_actual += 1
-                    
-                    if paso_actual >= len(PASOS_CALIBRACION):
-                        calibrado = True
-                        print("Calibración completa:", calibracion)
-
-
-
+            distancia = inf_y - sup_y
+            parpadeo = distancia < 20  # umbral de parpadeo, ajustar según sea necesario
+            if parpadeo:
+                cv2.putText(roi_grande, 'PARPADEO!', (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
 
 
             #dibujo de landmark
-            cv2.circle(frame, (iris_x, iris_y), 5, (0, 255, 0), -1)  # dibuja un círculo verde en el iris
-            cv2.circle(frame, (canto_ext_x, canto_ext_y), 5, (0, 0, 255), -1)  # dibuja un círculo rojo en el canto externo
-            cv2.circle(frame, (canto_int_x, canto_int_y), 5, (0, 0, 255), -1)  
-            cv2.circle(frame, (sup_x, sup_y), 5, (0, 0, 255), -1)  
-            cv2.circle(frame, (inf_x, inf_y), 5, (0, 0, 255), -1)  
+            #cv2.circle(frame, (iris_x, iris_y), 5, (0, 255, 0), -1)  # dibuja un círculo verde en el iris
+            #cv2.circle(frame, (canto_ext_x, canto_ext_y), 5, (0, 0, 255), -1)  # dibuja un círculo rojo en el canto externo
+            #cv2.circle(frame, (canto_int_x, canto_int_y), 5, (0, 0, 255), -1)  
+            #cv2.circle(roi_grande, (sup_x, sup_y), 5, (0, 255, 0), -1)  
+            #cv2.circle(roi_grande, (inf_x, inf_y), 5, (0, 255, 0), -1)  
 
             #texto coordenadas
-            cv2.putText(frame, f'Iris_derecho:      ({iris_x}, {iris_y})', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+            #cv2.putText(roi_grande, f'Iris_derecho:      ({iris_x}, {iris_y})', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
             cv2.putText(frame, f'Canto_ext:         ({canto_ext_x}, {canto_ext_y})', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
             cv2.putText(frame, f'Canto_int:         ({canto_int_x}, {canto_int_y})', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            cv2.putText(frame, f'Sup:               ({sup_x}, {sup_y})', (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            cv2.putText(frame, f'Inf:               ({inf_x}, {inf_y})', (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            cv2.putText(frame, f'promedio_contorno: ({promedio_screen_x}, {promedio_screen_y})', (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-            cv2.putText(frame, f'Distancia ojo: {distancia}px', (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-        # Muestra el frame en pantalla (usa BGR, por eso mostramos frame y no rgb_frame)
-        cv2.imshow("camara", frame)
+            cv2.putText(roi_grande, f'Sup:               ({sup_x}, {sup_y})', (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(roi_grande, f'Inf:               ({inf_x}, {inf_y})', (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(roi_grande, f'Distancia:         {distancia}', (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-        # q para exit ventana
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+
+        cv2.imshow("ojo_derecho", roi_grande)
+        key = cv2.waitKey(1) & 0xFF      
+        if key == ord('q'):
+            break    
 
 cap.release()
 cv2.destroyAllWindows() 
